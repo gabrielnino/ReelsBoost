@@ -1,15 +1,40 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, Loader2, Download, Video, Image as ImageIcon, PlayCircle } from 'lucide-react';
+import { Sparkles, Loader2, Download, Video, Image as ImageIcon, PlayCircle, Mic, Languages } from 'lucide-react';
 
 export default function Home() {
   const [prompt, setPrompt] = useState("");
+  const [narration, setNarration] = useState("");
+  const [language, setLanguage] = useState<"english" | "espanol">("english");
+  
   const [status, setStatus] = useState<"IDLE" | "GENERATING_IMAGE" | "GENERATING_VIDEO" | "SUCCESS" | "ERROR">("IDLE");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  const handleVideoPlay = () => {
+    if (audioRef.current) {
+       // Sync audio to video time
+       if (videoRef.current) audioRef.current.currentTime = videoRef.current.currentTime;
+       audioRef.current.play().catch(() => {});
+    }
+  };
+
+  const handleVideoPause = () => {
+    if (audioRef.current) audioRef.current.pause();
+  };
+
+  const handleVideoSeeked = () => {
+    if (audioRef.current && videoRef.current) {
+       audioRef.current.currentTime = videoRef.current.currentTime;
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,8 +45,9 @@ export default function Home() {
       setErrorMessage("");
       setImageUrl(null);
       setVideoUrl(null);
+      setAudioUrl(null);
 
-      // 1. Generate Image
+      // --- 1. Generate Image ---
       const imgRes = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -33,7 +59,29 @@ export default function Home() {
       const generatedImageUrl = imgData.imageUrl;
       setImageUrl(generatedImageUrl);
 
-      // 2. Generate Video Task
+      // --- 2. Dispatch Audio Generation (Parallel) ---
+      let audioPromise = Promise.resolve(null as string | null);
+      if (narration.trim()) {
+        audioPromise = fetch("/api/generate-audio", {
+           method: "POST",
+           headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ text: narration.trim(), language }),
+        })
+        .then(async (r) => {
+           const d = await r.json();
+           if (!r.ok) {
+              console.warn("Audio generation warning:", d.error);
+              return null;
+           }
+           if (d.audioBase64) return `data:audio/mp3;base64,${d.audioBase64}`;
+           return d.mockUrl || null;
+        }).catch(err => {
+           console.warn("Audio fetch failed:", err);
+           return null;
+        });
+      }
+
+      // --- 3. Generate Video Task ---
       setStatus("GENERATING_VIDEO");
       const vidRes = await fetch("/api/generate-video", {
         method: "POST",
@@ -45,7 +93,7 @@ export default function Home() {
 
       const taskId = vidData.task_id;
 
-      // 3. Poll Video Status
+      // --- 4. Poll Video Status ---
       let videoResultUrl = null;
       while (true) {
         await new Promise((resolve) => setTimeout(resolve, 3000)); // Poll every 3s
@@ -60,10 +108,13 @@ export default function Home() {
         } else if (statusData.error) {
            throw new Error(statusData.error);
         }
-        // else PENDING or RUNNING
       }
 
+      // Wait for audio just in case it takes longer than video polling (rare)
+      const generatedAudioUrl = await audioPromise;
+
       setVideoUrl(videoResultUrl);
+      setAudioUrl(generatedAudioUrl);
       setStatus("SUCCESS");
 
     } catch (err: any) {
@@ -94,32 +145,85 @@ export default function Home() {
           </h1>
         </div>
         <p className="text-gray-400 text-lg md:text-xl mb-10 text-center max-w-xl">
-          Convert a simple idea into a stunning <span className="text-white font-medium">viral vertical video</span> instantly using Alibaba Wan2.6 AI.
+          Convert a simple idea into a stunning <span className="text-white font-medium">viral vertical video</span> with AI Voice Narration.
         </p>
 
-        {/* Input Form */}
-        <form onSubmit={handleSubmit} className="w-full relative group">
+        {/* Configuration Form */}
+        <form onSubmit={handleSubmit} className="w-full relative group flex flex-col gap-4">
           <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-2xl opacity-20 group-focus-within:opacity-50 blur transition duration-500 pointer-events-none"></div>
-          <div className="relative flex items-center bg-[#111113] border border-white/10 rounded-2xl p-2 shadow-2xl">
-            <input
-              type="text"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              disabled={status === "GENERATING_IMAGE" || status === "GENERATING_VIDEO"}
-              placeholder="e.g. A futuristic cyberpunk city at sunset, neon glowing..."
-              className="flex-1 bg-transparent border-none outline-none px-4 py-3 text-white placeholder-gray-500 text-lg disabled:opacity-50 w-full"
-            />
+          
+          <div className="relative bg-[#111113] border border-white/10 rounded-2xl p-4 shadow-2xl flex flex-col gap-4">
+            
+            {/* Visual Prompt */}
+            <div className="flex flex-col gap-2">
+               <label className="text-xs font-bold text-white/50 uppercase tracking-wider flex items-center gap-2">
+                 <Sparkles className="w-3 h-3" /> Visual & Motion Prompt *
+               </label>
+               <input
+                 type="text"
+                 value={prompt}
+                 onChange={(e) => setPrompt(e.target.value)}
+                 disabled={status === "GENERATING_IMAGE" || status === "GENERATING_VIDEO"}
+                 placeholder="e.g. A futuristic cyberpunk city at sunset, neon glowing..."
+                 className="bg-black/40 border border-white/5 rounded-xl px-4 py-3 text-white placeholder-gray-600 text-lg disabled:opacity-50 w-full outline-none focus:border-purple-500/50 transition-colors"
+               />
+            </div>
+
+            <div className="h-px bg-white/5 w-full"></div>
+
+            {/* Narration Setup */}
+            <div className="flex flex-col md:flex-row gap-4">
+               <div className="flex-1 flex flex-col gap-2">
+                  <label className="text-xs font-bold text-white/50 uppercase tracking-wider flex items-center gap-2">
+                    <Mic className="w-3 h-3" /> Voice Narration (Optional)
+                  </label>
+                  <textarea
+                    value={narration}
+                    onChange={(e) => setNarration(e.target.value)}
+                    disabled={status === "GENERATING_IMAGE" || status === "GENERATING_VIDEO"}
+                    placeholder="Enter script for voiceover..."
+                    rows={2}
+                    className="bg-black/40 border border-white/5 resize-none rounded-xl px-4 py-3 text-white placeholder-gray-600 outline-none focus:border-pink-500/50 transition-colors disabled:opacity-50 w-full"
+                  />
+               </div>
+               
+               <div className="w-full md:w-48 flex flex-col gap-2">
+                  <label className="text-xs font-bold text-white/50 uppercase tracking-wider flex items-center gap-2">
+                    <Languages className="w-3 h-3" /> Language
+                  </label>
+                  <div className="flex bg-black/40 border border-white/5 p-1 rounded-xl">
+                     <button 
+                        type="button"
+                        onClick={() => setLanguage("english")}
+                        disabled={status === "GENERATING_IMAGE" || status === "GENERATING_VIDEO"}
+                        className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${language === "english" ? "bg-white/10 text-white" : "text-white/40 hover:text-white/80"}`}
+                     >
+                        English
+                     </button>
+                     <button 
+                        type="button"
+                        onClick={() => setLanguage("espanol")}
+                        disabled={status === "GENERATING_IMAGE" || status === "GENERATING_VIDEO"}
+                        className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${language === "espanol" ? "bg-white/10 text-white" : "text-white/40 hover:text-white/80"}`}
+                     >
+                        Español
+                     </button>
+                  </div>
+               </div>
+            </div>
+
+            {/* Submit */}
             <button
               type="submit"
               disabled={!prompt.trim() || status === "GENERATING_IMAGE" || status === "GENERATING_VIDEO"}
-              className="bg-white text-black hover:bg-gray-100 disabled:bg-white/20 disabled:text-white/40 border-none outline-none font-semibold px-6 py-3 rounded-xl transition-all active:scale-95 flex items-center gap-2 shadow-lg whitespace-nowrap"
+              className="mt-2 w-full bg-white text-black hover:bg-gray-100 disabled:bg-white/20 disabled:text-white/40 border-none outline-none font-bold px-6 py-4 rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg"
             >
               {status === "GENERATING_IMAGE" || status === "GENERATING_VIDEO" ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
                 <Sparkles className="w-5 h-5" />
               )}
-              {status === "GENERATING_IMAGE" ? "Imaging..." : status === "GENERATING_VIDEO" ? "Animating..." : "Generate"}
+              {status === "GENERATING_IMAGE" ? "Styling visual..." : status === "GENERATING_VIDEO" ? "Synthesizing AI Video & Audio..." : "Generate Reel"}
             </button>
           </div>
         </form>
@@ -207,23 +311,50 @@ export default function Home() {
                    </p>
                    <div className="relative w-full aspect-[9/16] rounded-3xl overflow-hidden border-2 border-white/20 shadow-[0_0_40px_rgba(236,72,153,0.2)] bg-black">
                       <video 
+                        ref={videoRef}
                         src={videoUrl} 
-                        autoPlay 
-                        loop 
-                        muted 
+                        loop={!audioUrl} // only loop if no audio to prevent desync loop issues, or we can loop both
+                        controls
+                        controlsList="nodownload"
                         playsInline
+                        onPlay={handleVideoPlay}
+                        onPause={handleVideoPause}
+                        onSeeked={handleVideoSeeked}
                         className="w-full h-full object-cover"
                       />
+                      {/* Hidden mapped Audio Track */}
+                      {audioUrl && (
+                        <audio 
+                          ref={audioRef} 
+                          src={audioUrl} 
+                          loop={false}
+                          className="hidden" 
+                        />
+                      )}
                    </div>
                    
+                   <p className="text-white/40 text-xs text-center px-4">
+                     {audioUrl ? "Audio track is synced with playback." : "No narration provided."}
+                   </p>
+
                    <a 
                      href={videoUrl} 
                      download="reelsboost_video.mp4" 
                      target="_blank" rel="noopener noreferrer"
-                     className="mt-4 w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white py-4 rounded-2xl font-bold shadow-lg shadow-purple-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                     className="mt-2 w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white py-4 rounded-2xl font-bold shadow-lg shadow-purple-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all"
                    >
-                     <Download className="w-5 h-5" /> Download Short
+                     <Download className="w-5 h-5" /> Download Video
                    </a>
+                   {audioUrl && (
+                      <a 
+                        href={audioUrl} 
+                        download="reelsboost_audio.mp3" 
+                        target="_blank" rel="noopener noreferrer"
+                        className="w-full flex items-center justify-center gap-2 bg-white/10 text-white py-4 rounded-2xl font-bold hover:bg-white/20 transition-all border border-white/10"
+                      >
+                       <Mic className="w-5 h-5" /> Download Audio
+                      </a>
+                   )}
                 </div>
               )}
 

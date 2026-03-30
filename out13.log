@@ -1,0 +1,3 @@
+Testing DashScope Audio API...
+CosyVoice API Status: 400
+Error body: {"code":"InvalidParameter","message":"Model not exist.","request_id":"d3997ce0-95ee-9c9d-a0ab-e8cbc7cc6139"}

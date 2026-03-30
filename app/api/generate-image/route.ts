@@ -15,15 +15,29 @@ export async function POST(request: Request) {
 
     // If no API key, return a mock image.
     if (!wanApiKey || wanApiKey.trim() === '') {
-      console.log("No WAN_API_KEY found. Returning mock image for prompt:", prompt);
+      console.log("No WAN_API_KEY found. Generating dynamic mock for prompt:", prompt);
       
-      // simulate API delay
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=720&height=1280`;
       
-      // vertical striking 9:16 mockup
-      return NextResponse.json({
-        imageUrl: `https://dashscope.oss-cn-beijing.aliyuncs.com/images/dog_and_girl.jpeg`
-      });
+      try {
+        const fallbackRes = await fetch(fallbackUrl);
+        if (!fallbackRes.ok) throw new Error("mock API error");
+        
+        const contentType = fallbackRes.headers.get("Content-Type") || "image/jpeg";
+        if (!contentType.includes("image")) throw new Error("not image");
+
+        const arrayBuffer = await fallbackRes.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const base64Str = `data:${contentType};base64,${buffer.toString('base64')}`;
+        
+        return NextResponse.json({
+          imageUrl: base64Str
+        });
+      } catch (e) {
+        return NextResponse.json({
+          imageUrl: `https://dashscope.oss-cn-beijing.aliyuncs.com/images/dog_and_girl.jpeg`
+        });
+      }
     }
 
     // 1. Submit Image Generation Task to Alibaba DashScope (wanx-v1)
@@ -55,9 +69,29 @@ export async function POST(request: Request) {
       const errText = !initResponse.ok ? await initResponse.text() : 'No task id';
       console.warn("Wanx image model might not be enabled on this DashScope account. Falling back to mockup. Reason:", errText);
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      return NextResponse.json({
-        imageUrl: `https://dashscope.oss-cn-beijing.aliyuncs.com/images/dog_and_girl.jpeg`
-      });
+      const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=720&height=1280`;
+      
+      try {
+        const fallbackRes = await fetch(fallbackUrl);
+        if (!fallbackRes.ok) throw new Error(`Pollinations API error: ${fallbackRes.status}`);
+        
+        const contentType = fallbackRes.headers.get("Content-Type") || "image/jpeg";
+        if (!contentType.includes("image")) throw new Error("Pollinations did not return an image");
+
+        const arrayBuffer = await fallbackRes.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const base64Str = `data:${contentType};base64,${buffer.toString('base64')}`;
+        
+        return NextResponse.json({
+          imageUrl: base64Str
+        });
+      } catch (e) {
+        console.error("Pollinations fallback failed", e);
+        // Absolute worst case scenario safe fallback
+        return NextResponse.json({
+          imageUrl: `https://dashscope.oss-cn-beijing.aliyuncs.com/images/dog_and_girl.jpeg` // we can send this as URL since DashScope can read this specific OSS url perfectly
+        });
+      }
     }
 
     const taskId = initData.output.task_id;

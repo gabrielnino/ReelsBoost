@@ -1,0 +1,5 @@
+Fetching pollinations... https://image.pollinations.ai/prompt/A%20horse%20and%20a%20girl%20running%20in%20a%20vibrant%20field?width=720&height=1280&nologo=true
+Pollinations status: 500 application/json
+Base64 string starts with: data:image/jpeg;base64,eyJlcnJvciI6IkludGVybmFsIFN length: 935
+Dashscope Status: 400
+Dashscope Response: {"request_id":"3c3030e9-924e-9c19-bc3b-a1c1288805b3","code":"InvalidParameter.DataInspection","message":"The media format is not supported or incorrect for the data inspection."}
